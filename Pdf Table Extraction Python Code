@@ -1,0 +1,77 @@
+import pdfplumber
+import pytesseract
+from pdf2image import convert_from_path
+import cv2
+import numpy as np
+import pandas as pd
+import os
+
+# Path to the PDF file
+pdf_path = r"C:\Users\dell\Documents\ZN 1106 2010-12 DE-EN.pdf"
+
+# Set Poppler path
+poppler_path = r"C:\Users\dell\Downloads\PdfPlumber\poppler-24.08.0\Library\bin"
+os.environ["PATH"] += os.pathsep + poppler_path
+
+# Set the correct path to Tesseract
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+# Output Excel file path
+output_excel_path = r"C:\Users\dell\Documents\Pdf_Folder2\extracted_tables11.xlsx"
+
+
+def is_pdf_scanned(pdf_path):
+    """Check if the PDF is scanned (contains no selectable text)."""
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:  # If any page has text, it is NOT scanned
+                return False
+    return True  # If no text is found in all pages, it's a scanned PDF
+
+
+def table_contains_keywords(table):
+    """Check if a table contains 'Nenngröße' or 'Nominal'."""
+    keywords = ["Nenngröße", "Nominal"]
+    
+    for row in table:
+        for cell in row:
+            cell_text = str(cell).strip().lower()  # Normalize text
+            if any(keyword.lower() in cell_text for keyword in keywords):
+                return True
+    return False
+
+
+def extract_tables_with_pdfplumber(pdf_path):
+    """Extract tables using pdfplumber and filter them based on keywords."""
+    tables = []
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_num, page in enumerate(pdf.pages, start=1):
+            extracted_table = page.extract_table()
+            
+            if extracted_table and table_contains_keywords(extracted_table):
+                df = pd.DataFrame(extracted_table).dropna(how="all").dropna(axis=1, how="all")
+                if not df.empty:
+                    tables.append((page_num, df))
+            else:
+                print(f"⚠️ Skipping table on Page {page_num} (No 'Nenngröße' or 'Nominal' found).")
+
+    return tables
+
+
+# **Check if the PDF is scanned before processing**
+if is_pdf_scanned(pdf_path):
+    print("❌ This is a scanned PDF. Processing cannot be done.")
+else:
+    tables = extract_tables_with_pdfplumber(pdf_path)
+
+    if tables:
+        with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
+            for page_num, table in tables:
+                sheet_name = f"Page_{page_num}"
+                table.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
+
+        print(f"✅ Tables containing 'Nenngröße' or 'Nominal' saved to: {output_excel_path}")
+    else:
+        print("❌ No valid tables detected.")
