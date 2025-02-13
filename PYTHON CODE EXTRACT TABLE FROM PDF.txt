@@ -1,0 +1,95 @@
+-----------------THIS PYTHON CODE EXTRACT TABLE FROM PDF & PRINT THAT IN EDITOR BUT FOR PRINT IT WILL NOT WORK IN UIPATH STUDIO FOR THAT PRINT SHOULD BE REMOVED --------------------------
+import pdfplumber
+import pandas as pd
+import os
+import traceback  # For detailed error logs
+
+def process_pdf(pdf_path, output_excel_path, poppler_path):
+    """
+    Process a PDF file:
+    - If it's scanned, return an error message.
+    - If it's searchable, extract tables containing specific keywords.
+    - Save extracted tables to an Excel file.
+
+    Parameters:
+        pdf_path (str): Path to the PDF file.
+        output_excel_path (str): Path where the extracted tables should be saved.
+        poppler_path (str): Path to the Poppler library.
+
+    Returns:
+        dict: A dictionary containing the status message and output file path (if applicable).
+    """
+    try:
+        # Set Poppler path for PDF processing
+        os.environ["PATH"] += os.pathsep + poppler_path
+
+        def is_pdf_scanned(pdf_path):
+            """Check if the PDF is scanned (contains no selectable text)."""
+            try:
+                with pdfplumber.open(pdf_path) as pdf:
+                    for page in pdf.pages:
+                        if page.extract_text():  # If any page has text, it's NOT scanned
+                            return False
+                return True  # No text found in any page, likely a scanned PDF
+            except Exception:
+                return True
+
+        def table_contains_keywords(table):
+            """Check if a table contains 'Nenngröße' or 'Nominal'."""
+            keywords = ["Nenngröße", "Nominal"]
+            return any(
+                any(keyword.lower() in str(cell).strip().lower() for keyword in keywords)
+                for row in table if row  # Ignore empty rows
+                for cell in row if cell  # Ignore empty cells
+            )
+
+        def extract_tables_with_pdfplumber(pdf_path):
+            """Extract tables using pdfplumber and filter them based on keywords."""
+            tables = []
+            try:
+                with pdfplumber.open(pdf_path) as pdf:
+                    for page_num, page in enumerate(pdf.pages, start=1):
+                        extracted_table = page.extract_table()
+                        if extracted_table:
+                            df = pd.DataFrame(extracted_table).dropna(how="all").dropna(axis=1, how="all")
+                            if not df.empty and table_contains_keywords(df.values.tolist()):
+                                tables.append((page_num, df))
+                return tables
+            except Exception:
+                return []
+
+        # **Check if the PDF is scanned**
+        if is_pdf_scanned(pdf_path):
+            return {"status": "Error", "message": "This is a scanned PDF. Processing cannot be done."}
+
+        # **Extract tables**
+        tables = extract_tables_with_pdfplumber(pdf_path)
+
+        if tables:
+            with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
+                for page_num, table in tables:
+                    sheet_name = f"Page_{page_num}"
+                    table.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
+            return {"status": "Success", "output_path": output_excel_path, "total_tables": len(tables)}
+
+        return {"status": "No valid tables detected", "output_path": None}
+
+    except Exception:
+        error_message = traceback.format_exc()  # Get full error traceback
+        return {"status": "Error", "message": error_message}
+
+
+# Example Call (For Testing in Python)
+result = process_pdf(
+    pdf_path="C:\\Users\\dell\\Documents\\ZN 1106 2010-12 DE-EN.pdf",
+    output_excel_path="C:\\Users\\dell\\Documents\\Pdf_Folder2\\extracted_tables2.xlsx",
+    poppler_path="C:\\Users\\dell\\Downloads\\PdfPlumber\\poppler-24.08.0\\Library\\bin",
+)
+
+# **Final One-Liner Output with Symbols**
+if result["status"] == "Success":
+    print(f"✅ {result}")
+elif result["status"] == "No valid tables detected":
+    print(f"⚠️ {result}")
+else:
+    print(f"❌ {result}")
